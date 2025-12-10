@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 	"time"
 	"github.com/adaptive-scale/webshell/internal/commands"
 	"github.com/adaptive-scale/webshell/internal/config"
-
+	"github.com/adaptive-scale/webshell/internal/templates"
 )
 
 // handleHome serves the home page with usage information
@@ -20,9 +19,10 @@ func Home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := template.ParseFiles("templates/home.html")
+	tmpl, err := templates.GetHomeTemplate()
 	if err != nil {
 		http.Error(w, "Failed to load template", http.StatusInternalServerError)
+		log.Printf("Failed to get home template: %v", err)
 		return
 	}
 
@@ -133,9 +133,10 @@ func TerminalPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := template.ParseFiles("templates/terminal.html")
+	tmpl, err := templates.GetTerminalTemplate()
 	if err != nil {
 		http.Error(w, "Failed to load template", http.StatusInternalServerError)
+		log.Printf("Failed to get terminal template: %v", err)
 		return
 	}
 

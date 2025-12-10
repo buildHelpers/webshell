@@ -29,7 +29,6 @@ WORKDIR /root/
 
 # Copy binary from builder
 COPY --from=builder /app/webshell .
-COPY --from=builder /app/templates ./templates
 
 EXPOSE 8080
 
