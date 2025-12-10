@@ -25,24 +25,22 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
+            make_target: build-linux
             binary_name: webshell_linux_amd64
           - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
+            make_target: build-linux-arm64
             binary_name: webshell_linux_arm64
           - os: macos-latest
-            goos: darwin
-            goarch: amd64
+            make_target: build-darwin
             binary_name: webshell_darwin_amd64
           - os: macos-latest
-            goos: darwin
-            goarch: arm64
+            make_target: build-darwin-arm64
             binary_name: webshell_darwin_arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整历史记录以获取 git describe 版本信息
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -52,14 +50,8 @@ jobs:
       - name: Get dependencies
         run: go mod download
 
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: |
-          mkdir -p build
-          go build -ldflags="-w -s" -o build/${{ matrix.binary_name }} main.go
+      - name: Build binary using Makefile
+        run: make ${{ matrix.make_target }}
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
