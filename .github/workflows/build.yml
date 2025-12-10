@@ -107,3 +107,74 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  release:
+    name: Create Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          # 查找并复制所有二进制文件（可能在子目录中）
+          find ./artifacts -type f -name "webshell_*" -exec cp {} release-assets/ \;
+          # 如果没找到，尝试查找所有文件
+          if [ -z "$(ls -A release-assets)" ]; then
+            find ./artifacts -type f -executable -exec cp {} release-assets/ \;
+          fi
+          # 确保文件有执行权限
+          chmod +x release-assets/* 2>/dev/null || true
+          # 列出所有文件
+          echo "Release assets:"
+          ls -lh release-assets/ || echo "No files found in release-assets"
+          echo ""
+          echo "Artifacts structure:"
+          find ./artifacts -type f
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release v${{ steps.get_version.outputs.version }}
+          body: |
+            ## v${{ steps.get_version.outputs.version }}
+
+            ### 📦 下载二进制文件
+            下载对应平台的二进制文件：
+            - `webshell_linux_amd64` - Linux AMD64
+            - `webshell_linux_arm64` - Linux ARM64
+            - `webshell_darwin_amd64` - macOS Intel
+            - `webshell_darwin_arm64` - macOS Apple Silicon
+
+            ### 🐳 Docker
+            ```bash
+            docker pull ghcr.io/buildhelpers/webshell:${{ steps.get_version.outputs.version }}
+            docker pull ghcr.io/buildhelpers/webshell:latest
+            ```
+
+            ### 📝 变更日志
+            查看 [完整变更日志](https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.ref_name }})
+          files: |
+            release-assets/*
+          draft: false
+          prerelease: false
+
