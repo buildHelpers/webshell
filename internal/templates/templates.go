@@ -123,7 +123,7 @@ Response (JSON with Accept: application/json):
         <h2>Quick Access</h2>
         <div style="text-align: center; margin: 20px 0;">
             <a id="terminalLink" href="/terminal" style="display: inline-block; background: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">
-                🖥️ Open Web Terminal
+                Open Web Terminal
             </a>
         </div>
         
