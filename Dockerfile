@@ -1,5 +1,10 @@
 # Build stage
-FROM golang:1.19-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.19-alpine AS builder
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETOS=linux
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -10,13 +15,15 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o webshell main.go
+# Build the application for target platform
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-w -s" -o webshell main.go
 
 # Final stage
-FROM alpine:latest
+FROM --platform=$TARGETPLATFORM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates for HTTPS support
+# Use --no-cache and update index first to avoid QEMU issues
+RUN apk update && apk --no-cache add ca-certificates tzdata && rm -rf /var/cache/apk/*
 
 WORKDIR /root/
 
@@ -27,4 +34,3 @@ COPY --from=builder /app/templates ./templates
 EXPOSE 8080
 
 CMD ["./webshell"]
-
