@@ -523,7 +523,7 @@ const TerminalTemplate = `<!DOCTYPE html>
 
 var (
 	homeTemplate     *template.Template
-	terminalTemplate  *template.Template
+	terminalTemplate *template.Template
 )
 
 // GetHomeTemplate returns the parsed home page template
@@ -549,4 +549,3 @@ func GetTerminalTemplate() (*template.Template, error) {
 	}
 	return terminalTemplate, nil
 }
-
