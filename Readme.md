@@ -238,6 +238,62 @@ PORT=3000 make run-build
 PORT=3000 make docker-run
 ```
 
+### Authentication (Optional)
+
+WebShell supports optional authentication via token. If a token is set, all API endpoints (except `/` and `/health`) will require authentication.
+
+**Using Command Line:**
+```bash
+# Start with token from command line
+./webshell -token "your-secret-token"
+
+# Start with token and custom port
+./webshell -port 3000 -token "your-secret-token"
+```
+
+**Using Environment Variable:**
+```bash
+# Set token via environment variable
+export AUTH_TOKEN="your-secret-token"
+./webshell
+
+# Or combine with port
+export PORT=3000
+export AUTH_TOKEN="your-secret-token"
+./webshell
+```
+
+**Using Token in Requests:**
+
+1. **Via Header (Recommended):**
+```bash
+curl -X POST http://localhost:8080/execute \
+  -H "X-Auth-Token: your-secret-token" \
+  -d "ls -la"
+```
+
+2. **Via Authorization Header:**
+```bash
+curl -X POST http://localhost:8080/execute \
+  -H "Authorization: Bearer your-secret-token" \
+  -d "ls -la"
+```
+
+3. **Via Query Parameter:**
+```bash
+curl -X POST "http://localhost:8080/execute?token=your-secret-token" \
+  -d "ls -la"
+```
+
+**Web Interface:**
+- If token is set, access the web interface with: `http://localhost:8080?token=your-secret-token`
+- The token will be automatically passed to all API calls and WebSocket connections
+
+**Security Note:**
+- If no token is set, the server is open to all requests (development mode)
+- Always use a strong, random token in production environments
+- The token is checked for all endpoints except `/` (home page) and `/health`
+
 ## API Endpoints
 
 ### POST /execute

@@ -114,7 +114,7 @@ Response (JSON with Accept: application/json):
         
         <h2>Quick Access</h2>
         <div style="text-align: center; margin: 20px 0;">
-            <a href="/terminal" style="display: inline-block; background: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">
+            <a id="terminalLink" href="/terminal" style="display: inline-block; background: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">
                 🖥️ Open Web Terminal
             </a>
         </div>
@@ -139,20 +139,42 @@ Response (JSON with Accept: application/json):
 # Simple command (returns raw output)
 curl -X POST http://localhost:8080/execute -d "ls -la"
 
+# With authentication token (if enabled)
+curl -X POST http://localhost:8080/execute \
+  -H "X-Auth-Token: your-token-here" \
+  -d "ls -la"
+
 # Command with arguments (returns raw output)
 curl -X POST http://localhost:8080/execute -d "find . -name '*.go'"
 
 # Get JSON response with metadata
 curl -X POST http://localhost:8080/execute \
   -H "Accept: application/json" \
+  -H "X-Auth-Token: your-token-here" \
   -d "uname -a"
 
-# System information (raw output)
-curl -X POST http://localhost:8080/execute -d "uptime"
+# Using query parameter for token
+curl -X POST "http://localhost:8080/execute?token=your-token-here" \
+  -d "uptime"
         </div>
     </div>
     
     <script>
+        // Get token from URL parameter if present
+        function getToken() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('token');
+        }
+        
+        // Update terminal link with token if present
+        function updateTerminalLink() {
+            const token = getToken();
+            const link = document.getElementById('terminalLink');
+            if (token) {
+                link.href = '/terminal?token=' + encodeURIComponent(token);
+            }
+        }
+        
         async function executeCommand() {
             const command = document.getElementById('commandInput').value.trim();
             if (!command) {
@@ -165,10 +187,23 @@ curl -X POST http://localhost:8080/execute -d "uptime"
             resultDiv.textContent = 'Executing...';
             
             try {
+                const headers = {};
+                const token = getToken();
+                if (token) {
+                    headers['X-Auth-Token'] = token;
+                }
+                
                 const response = await fetch('/execute', {
                     method: 'POST',
+                    headers: headers,
                     body: command
                 });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    resultDiv.textContent = 'Error: ' + errorText;
+                    return;
+                }
                 
                 const data = await response.json();
                 resultDiv.textContent = JSON.stringify(data, null, 2);
@@ -183,6 +218,9 @@ curl -X POST http://localhost:8080/execute -d "uptime"
                 executeCommand();
             }
         });
+        
+        // Update terminal link on page load
+        updateTerminalLink();
     </script>
 </body>
 </html>`
@@ -429,7 +467,13 @@ const TerminalTemplate = `<!DOCTYPE html>
             updateButtons(true, false);
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = protocol + '//' + window.location.host + '/ws';
+            // Get token from URL parameter if present
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            let wsUrl = protocol + '//' + window.location.host + '/ws';
+            if (token) {
+                wsUrl += '?token=' + encodeURIComponent(token);
+            }
             
             socket = new WebSocket(wsUrl);
 
