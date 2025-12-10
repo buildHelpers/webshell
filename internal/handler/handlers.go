@@ -72,7 +72,35 @@ func ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Split command into command and arguments
+	// Check if JSON response is requested
+	acceptHeader := r.Header.Get("Accept")
+	wantJSON := acceptHeader == "application/json"
+
+	// Execute command directly without whitelist restriction
+	// Support both single commands and full scripts
+	// If the command line contains newlines or is very long, treat it as a script
+	if strings.Contains(commandLine, "\n") || len(commandLine) > 100 {
+		// Execute as bash script
+		response := commands.ExecuteCommand("bash", []string{"-c", commandLine})
+		// Return response based on Accept header
+		if wantJSON {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(response)
+		} else {
+			// Return raw output
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			if response.Success {
+				w.Write([]byte(response.Output))
+			} else {
+				w.Write([]byte("Error: " + response.Error + "\n" + response.Output))
+			}
+		}
+		return
+	}
+
+	// Split command into command and arguments for simple commands
 	parts := strings.Fields(commandLine)
 	if len(parts) == 0 {
 		http.Error(w, "Invalid command", http.StatusBadRequest)
@@ -82,17 +110,7 @@ func ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 	command := parts[0]
 	args := parts[1:]
 
-	// Validate command
-	if !commands.AllowedCommands[command] {
-		http.Error(w, "Command not allowed", http.StatusForbidden)
-		return
-	}
-
-	// Check if JSON response is requested
-	acceptHeader := r.Header.Get("Accept")
-	wantJSON := acceptHeader == "application/json"
-
-	// Execute command
+	// Execute command (no whitelist restriction)
 	response := commands.ExecuteCommand(command, args)
 
 	// Return response based on Accept header
