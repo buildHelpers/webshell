@@ -63,6 +63,10 @@ PORT=3000 webshell
 - 🏥 **Health Check** - Built-in health monitoring endpoint
 - 🎨 **Beautiful UI** - Interactive web interface for testing
 - 🛠️ **Makefile Support** - Comprehensive build and development tools
+- 📤 **File Upload** - Upload files to server with overwrite/skip options
+- 📥 **File Download** - Download files from server by path
+- 🔐 **Secure Path Prefix** - Customize all endpoint paths for enhanced security
+- 🔒 **HTTPS Support** - TLS/SSL certificate support for secure connections
 
 ## Quick Start
 
@@ -294,6 +298,97 @@ curl -X POST "http://localhost:8080/execute?token=your-secret-token" \
 - Always use a strong, random token in production environments
 - The token is checked for all endpoints except `/` (home page) and `/health`
 
+### Secure Path Prefix
+
+WebShell supports custom path prefixes for all endpoints to enhance security. This allows you to hide the actual endpoint paths behind a random or custom prefix.
+
+**Using Command Line:**
+```bash
+# Use custom path prefix (e.g., 16 random characters)
+./webshell -path /a1b2c3d4e5f6g7h8/
+
+# All endpoints will be available under this prefix:
+# - /a1b2c3d4e5f6g7h8/execute
+# - /a1b2c3d4e5f6g7h8/upload
+# - /a1b2c3d4e5f6g7h8/download
+# - /a1b2c3d4e5f6g7h8/terminal
+# - /a1b2c3d4e5f6g7h8/ws
+```
+
+**Using Environment Variable:**
+```bash
+# Set path prefix via environment variable
+export SECURE_PATH="/abc123/"
+./webshell
+
+# Path will be automatically normalized (adds leading/trailing slashes if missing)
+```
+
+**Path Normalization:**
+- Paths are automatically normalized to start with `/` and end with `/`
+- Examples: `abc123` → `/abc123/`, `/abc123` → `/abc123/`
+- If not specified, defaults to `/` (standard paths)
+
+**Example with Path Prefix:**
+```bash
+# Start server with path prefix
+./webshell -token mytoken -path /xyz789/
+
+# Access endpoints
+curl -X POST http://localhost:8080/xyz789/execute \
+  -H "Authorization: Bearer mytoken" \
+  -d "ls -la"
+```
+
+### HTTPS/TLS Support
+
+WebShell supports HTTPS with TLS certificates for secure connections.
+
+**Using Command Line:**
+```bash
+# Start with HTTPS
+./webshell -cert /path/to/cert.pem -key /path/to/key.pem
+
+# Combine with other options
+./webshell \
+  -token mytoken \
+  -path /abc123/ \
+  -cert /path/to/cert.pem \
+  -key /path/to/key.pem \
+  -port 8443
+```
+
+**Using Environment Variables:**
+```bash
+# Set certificate paths via environment variables
+export CERT_FILE=/path/to/cert.pem
+export KEY_FILE=/path/to/key.pem
+./webshell
+
+# Or combine with other settings
+export PORT=8443
+export AUTH_TOKEN=mytoken
+export SECURE_PATH=/abc123/
+export CERT_FILE=/path/to/cert.pem
+export KEY_FILE=/path/to/key.pem
+./webshell
+```
+
+**HTTPS Behavior:**
+- If both certificate and key are provided, server runs in HTTPS mode
+- If certificate or key is missing, server runs in HTTP mode
+- TLS minimum version: TLS 1.2
+- Server automatically detects mode and logs it on startup
+
+**Example HTTPS Request:**
+```bash
+# Access via HTTPS
+curl -X POST https://localhost:8443/execute \
+  -H "Authorization: Bearer mytoken" \
+  -d "ls -la" \
+  -k  # Skip certificate verification for self-signed certs
+```
+
 ## API Endpoints
 
 ### POST /execute
@@ -351,6 +446,93 @@ Health check endpoint.
 
 Interactive web interface with usage examples, documentation, and a test form.
 
+### POST /upload
+
+Upload files to the server. Supports overwrite and skip options.
+
+**Request (multipart/form-data):**
+```bash
+curl -X POST http://localhost:8080/upload \
+  -H "Authorization: Bearer your-token" \
+  -F "file=@/path/to/local/file.txt" \
+  -F "path=/server/path/file.txt" \
+  -F "overwrite=true"
+```
+
+**Parameters:**
+- `file` (required): The file to upload
+- `path` (required): Target path on the server
+- `overwrite` (optional): Set to `true` to overwrite existing files, defaults to `false` (skip)
+
+**Response (success):**
+```json
+{
+  "status": "success",
+  "message": "File uploaded successfully",
+  "path": "/server/path/file.txt",
+  "filename": "file.txt",
+  "size": 1234,
+  "overwritten": false
+}
+```
+
+**Response (skipped):**
+```json
+{
+  "status": "skipped",
+  "message": "File already exists, skipped",
+  "path": "/server/path/file.txt"
+}
+```
+
+**Features:**
+- Automatically creates parent directories if they don't exist
+- Supports overwrite mode (replace existing files) or skip mode (preserve existing files)
+- Returns file metadata including size and upload status
+
+**Example with path prefix:**
+```bash
+# Upload with custom path prefix
+curl -X POST http://localhost:8080/abc123/upload \
+  -H "Authorization: Bearer your-token" \
+  -F "file=@/path/to/local/file.txt" \
+  -F "path=/server/path/file.txt" \
+  -F "overwrite=true"
+```
+
+### GET /download
+
+Download files from the server by path.
+
+**Request:**
+```bash
+curl -X GET "http://localhost:8080/download?path=/server/path/file.txt" \
+  -H "Authorization: Bearer your-token" \
+  -o downloaded_file.txt
+```
+
+**Query Parameters:**
+- `path` (required): Path to the file on the server
+
+**Response:**
+- Returns the file content with appropriate headers for download
+- Sets `Content-Disposition` header for proper filename handling
+- Returns 404 if file doesn't exist
+- Returns 400 if path is a directory
+
+**Example:**
+```bash
+# Download a file
+curl -X GET "http://localhost:8080/download?path=/var/log/app.log" \
+  -H "Authorization: Bearer your-token" \
+  -o app.log
+
+# Download with path prefix
+curl -X GET "http://localhost:8080/abc123/download?path=/var/log/app.log" \
+  -H "Authorization: Bearer your-token" \
+  -o app.log
+```
+
 ## Web Terminal Features
 
 The web terminal provides a full interactive shell experience:
@@ -394,6 +576,39 @@ For security reasons, only the following commands are allowed in the REST API:
 
 **Note**: The web terminal provides full shell access and is not restricted to the above commands.
 
+## Complete Configuration Example
+
+Here's a complete example with all features enabled:
+
+```bash
+# Start WebShell with all security features
+./webshell \
+  -port 8443 \
+  -token "your-strong-random-token" \
+  -path "/a1b2c3d4e5f6g7h8/" \
+  -cert "/path/to/certificate.pem" \
+  -key "/path/to/private-key.pem"
+```
+
+Or using environment variables:
+
+```bash
+export PORT=8443
+export AUTH_TOKEN="your-strong-random-token"
+export SECURE_PATH="/a1b2c3d4e5f6g7h8/"
+export CERT_FILE="/path/to/certificate.pem"
+export KEY_FILE="/path/to/private-key.pem"
+./webshell
+```
+
+**Access endpoints:**
+- Home: `https://localhost:8443/a1b2c3d4e5f6g7h8/`
+- Execute: `https://localhost:8443/a1b2c3d4e5f6g7h8/execute`
+- Upload: `https://localhost:8443/a1b2c3d4e5f6g7h8/upload`
+- Download: `https://localhost:8443/a1b2c3d4e5f6g7h8/download`
+- Terminal: `https://localhost:8443/a1b2c3d4e5f6g7h8/terminal`
+- WebSocket: `wss://localhost:8443/a1b2c3d4e5f6g7h8/ws`
+
 ## Security Considerations
 
 ⚠️ **Important Security Notes:**
@@ -403,5 +618,8 @@ For security reasons, only the following commands are allowed in the REST API:
 3. **Timeout Protection**: Commands have a 30-second timeout to prevent hanging processes
 4. **Input Validation**: All inputs are validated before execution
 5. **Production Use**: This server is designed for development/testing. Use with caution in production environments
-6. **Network Access**: Consider implementing authentication and HTTPS for production use
+6. **Network Access**: Always use authentication and HTTPS for production use
 7. **Session Isolation**: Each web terminal session is isolated and cleaned up properly
+8. **Secure Path Prefix**: Use random path prefixes to hide endpoint locations
+9. **File Upload Security**: Be cautious with file uploads - validate file types and sizes in production
+10. **HTTPS**: Always use HTTPS with valid certificates in production environments
