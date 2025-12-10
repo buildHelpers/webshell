@@ -105,6 +105,14 @@ Response (JSON with Accept: application/json):
             <p>Interactive web SSH terminal with full shell access.</p>
         </div>
         
+        <h2>Authentication</h2>
+        <div class="test-form" style="margin-bottom: 20px;">
+            <input type="password" id="tokenInput" placeholder="Enter authentication token (optional)" style="width: 400px; padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px;">
+            <button onclick="saveToken()" style="padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px; background: #007bff; color: white; cursor: pointer;">Save Token</button>
+            <button onclick="clearToken()" style="padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px; background: #dc3545; color: white; cursor: pointer;">Clear</button>
+            <div id="tokenStatus" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
+        </div>
+        
         <h2>Test Command Execution</h2>
         <div class="test-form">
             <input type="text" id="commandInput" placeholder="Enter command (e.g., ls -la)" style="width: 300px;">
@@ -160,18 +168,88 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
     </div>
     
     <script>
-        // Get token from URL parameter if present
+        // Token storage key
+        const TOKEN_STORAGE_KEY = 'webshell_auth_token';
+        
+        // Get token from multiple sources (priority: input > localStorage > URL)
         function getToken() {
+            // First check input field
+            const tokenInput = document.getElementById('tokenInput');
+            if (tokenInput && tokenInput.value) {
+                return tokenInput.value;
+            }
+            
+            // Then check localStorage
+            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+            if (storedToken) {
+                return storedToken;
+            }
+            
+            // Finally check URL parameter
             const urlParams = new URLSearchParams(window.location.search);
             return urlParams.get('token');
+        }
+        
+        // Save token to localStorage and update UI
+        function saveToken() {
+            const tokenInput = document.getElementById('tokenInput');
+            const token = tokenInput.value.trim();
+            const statusDiv = document.getElementById('tokenStatus');
+            
+            if (token) {
+                localStorage.setItem(TOKEN_STORAGE_KEY, token);
+                statusDiv.textContent = '✓ Token saved';
+                statusDiv.style.color = '#28a745';
+                updateTerminalLink();
+            } else {
+                clearToken();
+            }
+        }
+        
+        // Clear token from storage and input
+        function clearToken() {
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
+            const tokenInput = document.getElementById('tokenInput');
+            if (tokenInput) {
+                tokenInput.value = '';
+            }
+            const statusDiv = document.getElementById('tokenStatus');
+            statusDiv.textContent = 'Token cleared';
+            statusDiv.style.color = '#dc3545';
+            updateTerminalLink();
+        }
+        
+        // Load token from storage on page load
+        function loadToken() {
+            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+            const tokenInput = document.getElementById('tokenInput');
+            if (storedToken && tokenInput) {
+                tokenInput.value = storedToken;
+                const statusDiv = document.getElementById('tokenStatus');
+                statusDiv.textContent = '✓ Token loaded from storage';
+                statusDiv.style.color = '#28a745';
+            }
+            
+            // Also check URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlToken = urlParams.get('token');
+            if (urlToken && tokenInput && !tokenInput.value) {
+                tokenInput.value = urlToken;
+                localStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
+                const statusDiv = document.getElementById('tokenStatus');
+                statusDiv.textContent = '✓ Token loaded from URL';
+                statusDiv.style.color = '#28a745';
+            }
         }
         
         // Update terminal link with token if present
         function updateTerminalLink() {
             const token = getToken();
             const link = document.getElementById('terminalLink');
-            if (token) {
+            if (token && link) {
                 link.href = '/terminal?token=' + encodeURIComponent(token);
+            } else if (link) {
+                link.href = '/terminal';
             }
         }
         
@@ -219,7 +297,15 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
             }
         });
         
-        // Update terminal link on page load
+        // Allow Enter key to save token
+        document.getElementById('tokenInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                saveToken();
+            }
+        });
+        
+        // Initialize on page load
+        loadToken();
         updateTerminalLink();
     </script>
 </body>
@@ -371,6 +457,11 @@ const TerminalTemplate = `<!DOCTYPE html>
         <span class="hostname">@{{.Hostname}}</span>
         <span class="status-badge disconnected" id="statusBadge">Disconnected</span>
         <p>WebShell</p>
+        <div style="margin-top: 10px; display: flex; align-items: center; gap: 5px;">
+            <input type="password" id="tokenInput" placeholder="Auth Token (optional)" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 3px; font-size: 12px; width: 200px;">
+            <button onclick="saveToken()" style="padding: 5px 10px; border: none; border-radius: 3px; background: #28a745; color: white; cursor: pointer; font-size: 12px;">Save</button>
+            <button onclick="clearToken()" style="padding: 5px 10px; border: none; border-radius: 3px; background: #dc3545; color: white; cursor: pointer; font-size: 12px;">Clear</button>
+        </div>
     </div>
     
     <div class="status" id="status">Ready to connect</div>
@@ -459,6 +550,66 @@ const TerminalTemplate = `<!DOCTYPE html>
             }, 100);
         }
 
+        // Token storage key
+        const TOKEN_STORAGE_KEY = 'webshell_auth_token';
+        
+        // Get token from multiple sources (priority: input > localStorage > URL)
+        function getToken() {
+            // First check input field
+            const tokenInput = document.getElementById('tokenInput');
+            if (tokenInput && tokenInput.value) {
+                return tokenInput.value;
+            }
+            
+            // Then check localStorage
+            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+            if (storedToken) {
+                return storedToken;
+            }
+            
+            // Finally check URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('token');
+        }
+        
+        // Save token to localStorage
+        function saveToken() {
+            const tokenInput = document.getElementById('tokenInput');
+            const token = tokenInput.value.trim();
+            if (token) {
+                localStorage.setItem(TOKEN_STORAGE_KEY, token);
+                alert('Token saved');
+            } else {
+                clearToken();
+            }
+        }
+        
+        // Clear token from storage and input
+        function clearToken() {
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
+            const tokenInput = document.getElementById('tokenInput');
+            if (tokenInput) {
+                tokenInput.value = '';
+            }
+        }
+        
+        // Load token from storage on page load
+        function loadToken() {
+            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+            const tokenInput = document.getElementById('tokenInput');
+            if (storedToken && tokenInput) {
+                tokenInput.value = storedToken;
+            }
+            
+            // Also check URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlToken = urlParams.get('token');
+            if (urlToken && tokenInput && !tokenInput.value) {
+                tokenInput.value = urlToken;
+                localStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
+            }
+        }
+        
         // Connect to WebSocket
         function connect() {
             if (isConnected) return;
@@ -467,9 +618,8 @@ const TerminalTemplate = `<!DOCTYPE html>
             updateButtons(true, false);
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Get token from URL parameter if present
-            const urlParams = new URLSearchParams(window.location.search);
-            const token = urlParams.get('token');
+            // Get token from multiple sources
+            const token = getToken();
             let wsUrl = protocol + '//' + window.location.host + '/ws';
             if (token) {
                 wsUrl += '?token=' + encodeURIComponent(token);
@@ -559,6 +709,7 @@ const TerminalTemplate = `<!DOCTYPE html>
 
         // Initialize when page loads
         window.addEventListener('load', function() {
+            loadToken();
             initTerminal();
         });
     </script>
