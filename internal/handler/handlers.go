@@ -30,16 +30,11 @@ func Home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert AllowedCommands map to slice for template iteration
-	var allowedCommands []string
-	for cmd := range commands.AllowedCommands {
-		allowedCommands = append(allowedCommands, cmd)
-	}
-
+	// No command whitelist - all commands are allowed
 	data := struct {
 		AllowedCommands []string
 	}{
-		AllowedCommands: allowedCommands,
+		AllowedCommands: []string{}, // Empty list - all commands are allowed
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -78,8 +73,8 @@ func ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 
 	// Execute command directly without whitelist restriction
 	// Support both single commands and full scripts
-	// If the command line contains newlines or is very long, treat it as a script
-	if strings.Contains(commandLine, "\n") || len(commandLine) > 100 {
+	// If the command line contains newlines, treat it as a script
+	if strings.Contains(commandLine, "\n") {
 		// Execute as bash script
 		response := commands.ExecuteCommand("bash", []string{"-c", commandLine})
 		// Return response based on Accept header
