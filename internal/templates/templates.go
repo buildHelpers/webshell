@@ -9,6 +9,7 @@ const HomeTemplate = `<!DOCTYPE html>
 <html>
 <head>
     <title>SSH Fun - Command Executor</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2328a745'%3E%3Crect x='2' y='4' width='20' height='16' rx='2' fill='%2328a745'/%3E%3Cpath d='M6 8h12M6 12h8M6 16h10' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E">
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
         .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -122,7 +123,15 @@ Response (JSON with Accept: application/json):
         
         <h2>Quick Access</h2>
         <div style="text-align: center; margin: 20px 0;">
-            <a id="terminalLink" href="/terminal" style="display: inline-block; background: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">
+            <a id="terminalLink" href="/terminal" style="display: inline-flex; align-items: center; gap: 8px; background: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 18px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
+                    <rect x="3" y="4" width="18" height="16" rx="2" fill="currentColor" opacity="0.2"/>
+                    <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    <line x1="6" y1="8" x2="18" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <line x1="6" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <line x1="6" y1="16" x2="16" y2="16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <circle cx="19" cy="6" r="1.5" fill="currentColor"/>
+                </svg>
                 Open Web Terminal
             </a>
         </div>
@@ -316,6 +325,7 @@ const TerminalTemplate = `<!DOCTYPE html>
 <html>
 <head>
     <title>SSH Fun - Web Terminal</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2328a745'%3E%3Crect x='2' y='4' width='20' height='16' rx='2' fill='%2328a745'/%3E%3Cpath d='M6 8h12M6 12h8M6 16h10' stroke='white' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
