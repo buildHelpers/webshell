@@ -177,6 +177,22 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
     </div>
     
     <script>
+        // Get base path from current URL
+        function getBasePath() {
+            const path = window.location.pathname;
+            // Extract base path (everything before the last segment)
+            // e.g., /xx/terminal -> /xx/
+            // e.g., /xx/ -> /xx/
+            // e.g., / -> /
+            const segments = path.split('/').filter(s => s);
+            if (segments.length > 0) {
+                // Remove the last segment (like 'terminal' or empty)
+                segments.pop();
+            }
+            const basePath = '/' + segments.join('/');
+            return basePath.endsWith('/') ? basePath : basePath + '/';
+        }
+        
         // Token storage key
         const TOKEN_STORAGE_KEY = 'webshell_auth_token';
         
@@ -253,12 +269,15 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
         
         // Update terminal link with token if present
         function updateTerminalLink() {
+            const basePath = getBasePath();
             const token = getToken();
             const link = document.getElementById('terminalLink');
-            if (token && link) {
-                link.href = '/terminal?token=' + encodeURIComponent(token);
-            } else if (link) {
-                link.href = '/terminal';
+            if (link) {
+                let href = basePath + 'terminal';
+                if (token) {
+                    href += '?token=' + encodeURIComponent(token);
+                }
+                link.href = href;
             }
         }
         
@@ -274,13 +293,14 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
             resultDiv.textContent = 'Executing...';
             
             try {
+                const basePath = getBasePath();
                 const headers = {};
                 const token = getToken();
                 if (token) {
                     headers['X-Auth-Token'] = token;
                 }
                 
-                const response = await fetch('/execute', {
+                const response = await fetch(basePath + 'execute', {
                     method: 'POST',
                     headers: headers,
                     body: command

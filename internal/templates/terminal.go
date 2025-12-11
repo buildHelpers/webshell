@@ -170,10 +170,26 @@ const TerminalTemplate = `<!DOCTYPE html>
     </div>
     
     <div class="back-link">
-        <a href="/">← Back to Home</a>
+        <a id="homeLink" href="/">← Back to Home</a>
     </div>
 
     <script>
+        // Get base path from current URL
+        function getBasePath() {
+            const path = window.location.pathname;
+            // Extract base path (everything before the last segment)
+            // e.g., /xx/terminal -> /xx/
+            // e.g., /xx/ -> /xx/
+            // e.g., / -> /
+            const segments = path.split('/').filter(s => s);
+            if (segments.length > 0) {
+                // Remove the last segment (like 'terminal' or empty)
+                segments.pop();
+            }
+            const basePath = '/' + segments.join('/');
+            return basePath.endsWith('/') ? basePath : basePath + '/';
+        }
+        
         let term;
         let socket;
         let fitAddon;
@@ -312,9 +328,10 @@ const TerminalTemplate = `<!DOCTYPE html>
             updateButtons(true, false);
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const basePath = getBasePath();
             // Get token from multiple sources
             const token = getToken();
-            let wsUrl = protocol + '//' + window.location.host + '/ws';
+            let wsUrl = protocol + '//' + window.location.host + basePath + 'ws';
             if (token) {
                 wsUrl += '?token=' + encodeURIComponent(token);
             }
@@ -401,8 +418,18 @@ const TerminalTemplate = `<!DOCTYPE html>
             document.getElementById('disconnectBtn').disabled = !connected;
         }
 
+        // Update home link with base path
+        function updateHomeLink() {
+            const basePath = getBasePath();
+            const link = document.getElementById('homeLink');
+            if (link) {
+                link.href = basePath;
+            }
+        }
+        
         // Initialize when page loads
         window.addEventListener('load', function() {
+            updateHomeLink();
             loadToken();
             initTerminal();
         });
