@@ -219,12 +219,13 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write file
+	// Write file and explicitly set permissions (bypass umask)
 	if err := os.WriteFile(targetPath, content, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
 		log.Printf("Failed to write file %s: %v", targetPath, err)
 		return
 	}
+	os.Chmod(targetPath, 0644)
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
@@ -303,12 +304,13 @@ func UploadFilePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write file
+	// Write file and explicitly set permissions (bypass umask)
 	if err := os.WriteFile(targetPath, content, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
 		log.Printf("Failed to write file %s: %v", targetPath, err)
 		return
 	}
+	os.Chmod(targetPath, 0644)
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
