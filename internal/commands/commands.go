@@ -18,13 +18,16 @@ type CommandResponse struct {
 	Command   string `json:"command"`
 }
 
-// executeCommand executes a command with timeout and returns the result
-// Timeout is increased to 300 seconds to support script execution
-func ExecuteCommand(command string, args []string) CommandResponse {
+// ExecuteCommand executes a command with configurable timeout and returns the result
+func ExecuteCommand(command string, args []string, timeoutSeconds int) CommandResponse {
 	start := time.Now()
 
-	// Create context with timeout (300 seconds for script execution)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 300
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
 	// Create command
@@ -36,11 +39,19 @@ func ExecuteCommand(command string, args []string) CommandResponse {
 	// Calculate duration
 	duration := time.Since(start)
 
+	// Get exit code
+	exitCode := 0
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	} else if err != nil {
+		exitCode = -1
+	}
+
 	// Prepare response
 	response := CommandResponse{
 		Success:   err == nil,
-		Output:    string(output), // Keep full output including newlines
-		ExitCode:  cmd.ProcessState.ExitCode(),
+		Output:    string(output),
+		ExitCode:  exitCode,
 		Duration:  duration.String(),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Command:   command + " " + strings.Join(args, " "),

@@ -77,7 +77,8 @@ func main() {
 	log.Printf("  - Execute: %sexecute", pathPrefix)
 	log.Printf("  - Terminal: %sterminal", pathPrefix)
 	log.Printf("  - WebSocket: %sws", pathPrefix)
-	log.Printf("  - Upload: %supload", pathPrefix)
+	log.Printf("  - Upload (POST multipart): %supload", pathPrefix)
+	log.Printf("  - Upload (PUT raw body): %supload", pathPrefix)
 	log.Printf("  - Download: %sdownload", pathPrefix)
 
 	// Start server with or without TLS
@@ -124,6 +125,15 @@ func setupRoutes(pathPrefix string) {
 	http.HandleFunc(pathPrefix+"execute", auth.AuthMiddleware(handler.ExecuteCommand))
 	http.HandleFunc(pathPrefix+"terminal", auth.AuthMiddleware(handler.TerminalPage))
 	http.HandleFunc(pathPrefix+"ws", auth.AuthMiddleware(terminal.WebSocket))
-	http.HandleFunc(pathPrefix+"upload", auth.AuthMiddleware(handler.UploadFile))
+	http.HandleFunc(pathPrefix+"upload", auth.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			handler.UploadFile(w, r)
+		case http.MethodPut:
+			handler.UploadFilePut(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
 	http.HandleFunc(pathPrefix+"download", auth.AuthMiddleware(handler.DownloadFile))
 }

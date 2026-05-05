@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +46,10 @@ func Home(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleExecuteCommand executes commands via HTTP POST
+// ExecuteCommand executes commands via HTTP POST
+// Always uses bash -c for consistent shell behavior
+// Always returns JSON response with exit_code
+// Supports X-Timeout header for client-specified timeout (default: 300s)
 func ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -67,62 +71,22 @@ func ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if JSON response is requested
-	acceptHeader := r.Header.Get("Accept")
-	wantJSON := acceptHeader == "application/json"
-
-	// Execute command directly without whitelist restriction
-	// Support both single commands and full scripts
-	// If the command line contains newlines, treat it as a script
-	if strings.Contains(commandLine, "\n") {
-		// Execute as bash script
-		response := commands.ExecuteCommand("bash", []string{"-c", commandLine})
-		// Return response based on Accept header
-		if wantJSON {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(response)
-		} else {
-			// Return raw output
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusOK)
-			if response.Success {
-				w.Write([]byte(response.Output))
-			} else {
-				w.Write([]byte("Error: " + response.Error + "\n" + response.Output))
-			}
-		}
-		return
-	}
-
-	// Split command into command and arguments for simple commands
-	parts := strings.Fields(commandLine)
-	if len(parts) == 0 {
-		http.Error(w, "Invalid command", http.StatusBadRequest)
-		return
-	}
-
-	command := parts[0]
-	args := parts[1:]
-
-	// Execute command (no whitelist restriction)
-	response := commands.ExecuteCommand(command, args)
-
-	// Return response based on Accept header
-	if wantJSON {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
-	} else {
-		// Return raw output
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		if response.Success {
-			w.Write([]byte(response.Output))
-		} else {
-			w.Write([]byte("Error: " + response.Error))
+	// Parse timeout from X-Timeout header (seconds), default 300
+	timeoutSeconds := 300
+	if timeoutStr := r.Header.Get("X-Timeout"); timeoutStr != "" {
+		if t, err := strconv.Atoi(timeoutStr); err == nil && t > 0 {
+			timeoutSeconds = t
 		}
 	}
+
+	// Always execute via bash -c for consistent shell behavior
+	// This ensures env vars, redirections, pipes all work correctly
+	response := commands.ExecuteCommand("bash", []string{"-c", commandLine}, timeoutSeconds)
+
+	// Always return JSON response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleHealth serves the health check endpoint
@@ -171,7 +135,19 @@ func TerminalPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UploadFile handles file upload requests
+// validatePath checks for path traversal attacks
+func validatePath(path string) error {
+	cleaned := filepath.Clean(path)
+	if strings.Contains(cleaned, "..") {
+		return fmt.Errorf("path traversal not allowed")
+	}
+	if !filepath.IsAbs(cleaned) {
+		return fmt.Errorf("absolute path required")
+	}
+	return nil
+}
+
+// UploadFile handles file upload requests via multipart/form-data (POST)
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -202,6 +178,12 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate path
+	if err := validatePath(targetPath); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid path: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	// Get overwrite option (default: skip)
 	overwrite := r.FormValue("overwrite") == "true"
 
@@ -210,7 +192,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat(targetPath); err == nil {
 		fileExisted = true
 		if !overwrite {
-			// File exists and overwrite is false, skip
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -230,18 +211,16 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create or overwrite the file
-	dst, err := os.Create(targetPath)
+	// Read file content
+	content, err := io.ReadAll(file)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create file: %v", err), http.StatusInternalServerError)
-		log.Printf("Failed to create file %s: %v", targetPath, err)
+		http.Error(w, fmt.Sprintf("Failed to read file: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to read uploaded file: %v", err)
 		return
 	}
-	defer dst.Close()
 
-	// Copy file content
-	_, err = io.Copy(dst, file)
-	if err != nil {
+	// Write file
+	if err := os.WriteFile(targetPath, content, 0644); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
 		log.Printf("Failed to write file %s: %v", targetPath, err)
 		return
@@ -255,7 +234,90 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		"message":     "File uploaded successfully",
 		"path":        targetPath,
 		"filename":    header.Filename,
-		"size":        header.Size,
+		"size":        len(content),
+		"overwritten": fileExisted,
+	})
+}
+
+// UploadFilePut handles file upload via PUT request
+// PUT /upload?path=/tmp/config.json&overwrite=true
+// Body contains raw file content (no multipart encoding needed)
+func UploadFilePut(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get target path from query parameter
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		http.Error(w, "Target path is required (use ?path=...)", http.StatusBadRequest)
+		return
+	}
+
+	// Validate path
+	if err := validatePath(targetPath); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid path: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get overwrite option (default: true for PUT semantics)
+	overwriteStr := r.URL.Query().Get("overwrite")
+	overwrite := overwriteStr != "false" // default true
+
+	// Check if file exists
+	fileExisted := false
+	if _, err := os.Stat(targetPath); err == nil {
+		fileExisted = true
+		if !overwrite {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "skipped",
+				"message": "File already exists, skipped",
+				"path":    targetPath,
+			})
+			return
+		}
+	}
+
+	// Read request body
+	content, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		log.Printf("Failed to read PUT body: %v", err)
+		return
+	}
+	defer r.Body.Close()
+
+	if len(content) == 0 {
+		http.Error(w, "Empty request body", http.StatusBadRequest)
+		return
+	}
+
+	// Create directory if it doesn't exist
+	dir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create directory: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to create directory %s: %v", dir, err)
+		return
+	}
+
+	// Write file
+	if err := os.WriteFile(targetPath, content, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to write file %s: %v", targetPath, err)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "success",
+		"message":     "File uploaded successfully",
+		"path":        targetPath,
+		"size":        len(content),
 		"overwritten": fileExisted,
 	})
 }
@@ -271,6 +333,12 @@ func DownloadFile(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		http.Error(w, "File path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate path
+	if err := validatePath(filePath); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid path: %v", err), http.StatusBadRequest)
 		return
 	}
 
