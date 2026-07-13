@@ -5,14 +5,17 @@ set -e
 
 # Configuration
 REPO="buildHelpers/webshell"
-VERSION=${1:-"latest"}
+VERSION="latest"
 BINARY_NAME="chumen-webshell"
 SERVICE_NAME="chumen-webshell"
 INSTALL_SERVICE=false
 
-if [ "${1:-}" = "--service" ]; then
-    INSTALL_SERVICE=true
-fi
+for argument in "$@"; do
+    case "$argument" in
+        --service) INSTALL_SERVICE=true ;;
+        *) VERSION="$argument" ;;
+    esac
+done
 
 echo "WebShell Install Script"
 echo "Repository: ${REPO}"
