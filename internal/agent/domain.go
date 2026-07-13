@@ -127,8 +127,8 @@ func upsertCloudflareARecord(request domainSetupRequest) error {
 
 func configureCaddy(hostname string) error {
 	if !commandExists("caddy") {
-		if output, err := exec.Command("bash", "-lc", "apt-get update -qq && apt-get install -y -qq caddy").CombinedOutput(); err != nil {
-			return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+		if err := installCaddy(); err != nil {
+			return err
 		}
 	}
 	port, _ := strconv.Atoi(readEnvironment(serviceEnvironmentPath)["PORT"])
@@ -144,6 +144,39 @@ func configureCaddy(hostname string) error {
 	}
 	if output, err := exec.Command("systemctl", "reload", "caddy").CombinedOutput(); err != nil {
 		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// installCaddy supports the common Linux package managers. WebShell's service deployment
+// requires systemd, so non-Linux or container-only environments are rejected later with the
+// same explicit systemd error rather than attempting an unsafe, ad-hoc installation.
+func installCaddy() error {
+	var commands [][]string
+	switch {
+	case commandExists("apt-get"):
+		commands = [][]string{{"apt-get", "update", "-qq"}, {"apt-get", "install", "-y", "-qq", "caddy"}}
+	case commandExists("dnf"):
+		commands = [][]string{{"dnf", "install", "-y", "caddy"}}
+	case commandExists("yum"):
+		commands = [][]string{{"yum", "install", "-y", "caddy"}}
+	case commandExists("apk"):
+		commands = [][]string{{"apk", "add", "--no-cache", "caddy"}}
+	case commandExists("pacman"):
+		commands = [][]string{{"pacman", "-Sy", "--noconfirm", "caddy"}}
+	case commandExists("zypper"):
+		commands = [][]string{{"zypper", "--non-interactive", "install", "--no-recommends", "caddy"}}
+	default:
+		return fmt.Errorf("no supported package manager found; install Caddy manually, then retry domain setup")
+	}
+
+	for _, command := range commands {
+		if output, err := exec.Command(command[0], command[1:]...).CombinedOutput(); err != nil {
+			return fmt.Errorf("%s failed: %s", command[0], strings.TrimSpace(string(output)))
+		}
+	}
+	if !commandExists("caddy") {
+		return fmt.Errorf("Caddy package installation completed but caddy is not on PATH")
 	}
 	return nil
 }
