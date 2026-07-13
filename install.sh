@@ -4,9 +4,15 @@
 set -e
 
 # Configuration
-REPO="adaptive-scale/webshell"
+REPO="buildHelpers/webshell"
 VERSION=${1:-"latest"}
-BINARY_NAME="webshell"
+BINARY_NAME="chumen-webshell"
+SERVICE_NAME="chumen-webshell"
+INSTALL_SERVICE=false
+
+if [ "${1:-}" = "--service" ]; then
+    INSTALL_SERVICE=true
+fi
 
 echo "WebShell Install Script"
 echo "Repository: ${REPO}"
@@ -77,7 +83,7 @@ else
     echo "Add $HOME/.local/bin to your PATH if not already added"
     echo "Add this line to your shell profile:"
     echo "export PATH=\"\$HOME/.local/bin:\$PATH\""
-    echo "Alternative: you can run ~/.local/bin/webshell"
+    echo "Alternative: you can run ~/.local/bin/chumen-webshell"
 fi
 
 # Verify
@@ -96,6 +102,71 @@ fi
 echo ""
 echo "WebShell installation completed successfully"
 echo ""
+
+# A service install is the bootstrap contract used by application clients. Keeping token, port,
+# and path in a root-only EnvironmentFile avoids leaking them through the systemd unit itself.
+if [ "$INSTALL_SERVICE" = true ]; then
+    if [ -z "${AUTH_TOKEN:-}" ]; then
+        echo "AUTH_TOKEN is required when installing the WebShell service"
+        exit 1
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "systemd is required for --service"
+        exit 1
+    fi
+    SERVICE_PORT="${PORT:-8080}"
+    SERVICE_PATH="${SECURE_PATH:-/}"
+    SERVICE_BINARY="$(command -v "$BINARY_NAME")"
+    if [ "$(id -u)" -eq 0 ]; then
+        AS_ROOT=""
+    else
+        AS_ROOT="sudo -n"
+    fi
+    $AS_ROOT install -d -m 700 /etc/chumen-webshell/tls
+    CERT_FILE="/etc/chumen-webshell/tls/server.crt"
+    KEY_FILE="/etc/chumen-webshell/tls/server.key"
+    if [ ! -s "$CERT_FILE" ] || [ ! -s "$KEY_FILE" ]; then
+        command -v openssl >/dev/null 2>&1 || { $AS_ROOT apt-get update -qq && $AS_ROOT apt-get install -y -qq openssl; }
+        $AS_ROOT openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 \
+            -subj "/CN=chumen-webshell" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1
+        $AS_ROOT chmod 600 "$KEY_FILE"
+    fi
+    TLS_FINGERPRINT=$($AS_ROOT openssl x509 -in "$CERT_FILE" -noout -fingerprint -sha256 | sed 's/.*=//' | tr -d ':')
+    $AS_ROOT install -d -m 700 /etc/chumen-webshell
+    $AS_ROOT sh -c "umask 077 && cat > /etc/chumen-webshell/chumen-webshell.env" <<EOF
+AUTH_TOKEN=${AUTH_TOKEN}
+PORT=${SERVICE_PORT}
+SECURE_PATH=${SERVICE_PATH}
+PUBLIC_PORT=${PUBLIC_PORT:-443}
+CERT_FILE=${CERT_FILE}
+KEY_FILE=${KEY_FILE}
+EOF
+    $AS_ROOT tee /etc/systemd/system/${SERVICE_NAME}.service >/dev/null <<EOF
+[Unit]
+Description=Chumen WebShell management API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/chumen-webshell/chumen-webshell.env
+ExecStart=${SERVICE_BINARY}
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    $AS_ROOT systemctl daemon-reload
+    $AS_ROOT systemctl enable --now "$SERVICE_NAME"
+    $AS_ROOT systemctl is-active --quiet "$SERVICE_NAME"
+    echo "WebShell systemd service is active on port ${SERVICE_PORT}"
+    echo "CHUMEN_WEBSHELL_TLS_SHA256=${TLS_FINGERPRINT}"
+fi
+
 echo "Usage Information:"
 echo "Start WebShell: $BINARY_NAME"
 echo "Access Web Interface: http://localhost:8080"
@@ -121,4 +192,4 @@ case "${1:-}" in
         ;;
     *)
         ;;
-esac 
+esac

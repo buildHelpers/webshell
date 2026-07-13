@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/adaptive-scale/webshell/internal/agent"
 	"github.com/adaptive-scale/webshell/internal/auth"
 	"github.com/adaptive-scale/webshell/internal/config"
 	"github.com/adaptive-scale/webshell/internal/handler"
@@ -63,6 +64,14 @@ func main() {
 	keyPath := *keyFile
 	if keyPath == "" {
 		keyPath = config.GetEnv("KEY_FILE", "")
+	}
+	if (certPath == "") != (keyPath == "") {
+		log.Fatal("both CERT_FILE and KEY_FILE are required for TLS")
+	}
+	// Chumen's service installer always supplies AUTH_TOKEN and a certificate. Refuse a
+	// misconfigured authenticated service rather than silently exposing its bearer token over HTTP.
+	if token != "" && certPath == "" {
+		log.Fatal("authenticated Chumen WebShell requires TLS certificate and key")
 	}
 
 	log.Printf("WebShell server starting on port %s", serverPort)
@@ -122,6 +131,13 @@ func setupRoutes(pathPrefix string) {
 	http.HandleFunc(pathPrefix+"health", handler.Health)
 
 	// Protected routes
+	// Agent routes are fixed operations for application clients. Keep them separate from the
+	// interactive terminal so Chumen never has to expose an arbitrary command execution surface.
+	http.HandleFunc(pathPrefix+"api/v1/status", auth.AuthMiddleware(agent.Status))
+	http.HandleFunc(pathPrefix+"api/v1/control-plane", auth.AuthMiddleware(agent.ControlPlaneConfiguration))
+	http.HandleFunc(pathPrefix+"api/v1/domain/status", auth.AuthMiddleware(agent.DomainStatus))
+	http.HandleFunc(pathPrefix+"api/v1/domain/setup", auth.AuthMiddleware(agent.SetupDomain))
+	http.HandleFunc(pathPrefix+"api/v1/xray/install", auth.AuthMiddleware(agent.InstallXray))
 	http.HandleFunc(pathPrefix+"execute", auth.AuthMiddleware(handler.ExecuteCommand))
 	http.HandleFunc(pathPrefix+"terminal", auth.AuthMiddleware(handler.TerminalPage))
 	http.HandleFunc(pathPrefix+"ws", auth.AuthMiddleware(terminal.WebSocket))
