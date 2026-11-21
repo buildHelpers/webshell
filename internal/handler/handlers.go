@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/adaptive-scale/webshell/internal/commands"
-	"github.com/adaptive-scale/webshell/internal/config"
 	"github.com/adaptive-scale/webshell/internal/templates"
 )
 
@@ -121,15 +120,11 @@ func TerminalPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := struct {
-		Hostname string
-	}{
-		Hostname: config.GetHostname(),
-	}
-
 	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(http.StatusOK)
-	err = tmpl.Execute(w, data)
+	err = tmpl.Execute(w, nil)
 	if err != nil {
 		log.Printf("Failed to execute template: %v", err)
 	}

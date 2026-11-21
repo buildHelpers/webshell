@@ -13,9 +13,9 @@ const TerminalTemplate = `<!DOCTYPE html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" integrity="sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" integrity="sha384-9ftsg11+LSxVUaknegCfeKvlkO9EdIPI2op725RqY87IvhyGjElmpjZlP3LhTQjn" crossorigin="anonymous" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js" integrity="sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn" crossorigin="anonymous"></script>
     <style>
         body {
             margin: 0;
@@ -148,13 +148,10 @@ const TerminalTemplate = `<!DOCTYPE html>
 <body>
     <div class="header">
         <h1>SSH - Web Terminal</h1>
-        <span class="hostname">@{{.Hostname}}</span>
         <span class="status-badge disconnected" id="statusBadge">Disconnected</span>
         <p>WebShell</p>
         <div style="margin-top: 10px; display: flex; align-items: center; gap: 5px;">
-            <input type="password" id="tokenInput" placeholder="Auth Token (optional)" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 3px; font-size: 12px; width: 200px;">
-            <button onclick="saveToken()" style="padding: 5px 10px; border: none; border-radius: 3px; background: #28a745; color: white; cursor: pointer; font-size: 12px;">Save</button>
-            <button onclick="clearToken()" style="padding: 5px 10px; border: none; border-radius: 3px; background: #dc3545; color: white; cursor: pointer; font-size: 12px;">Clear</button>
+            <input type="password" id="tokenInput" autocomplete="off" placeholder="Authentication token" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 3px; font-size: 12px; width: 200px;">
         </div>
     </div>
     
@@ -254,89 +251,35 @@ const TerminalTemplate = `<!DOCTYPE html>
                 }
             });
 
-            // Auto-connect after terminal initialization
-            setTimeout(() => {
-                connect();
-            }, 100);
         }
 
-        // Token storage key
-        const TOKEN_STORAGE_KEY = 'webshell_auth_token';
-        
-        // Get token from multiple sources (priority: input > localStorage > URL)
-        function getToken() {
-            // First check input field
-            const tokenInput = document.getElementById('tokenInput');
-            if (tokenInput && tokenInput.value) {
-                return tokenInput.value;
-            }
-            
-            // Then check localStorage
-            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-            if (storedToken) {
-                return storedToken;
-            }
-            
-            // Finally check URL parameter
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('token');
-        }
-        
-        // Save token to localStorage
-        function saveToken() {
-            const tokenInput = document.getElementById('tokenInput');
-            const token = tokenInput.value.trim();
-            if (token) {
-                localStorage.setItem(TOKEN_STORAGE_KEY, token);
-                alert('Token saved');
-            } else {
-                clearToken();
-            }
-        }
-        
-        // Clear token from storage and input
-        function clearToken() {
-            localStorage.removeItem(TOKEN_STORAGE_KEY);
-            const tokenInput = document.getElementById('tokenInput');
-            if (tokenInput) {
-                tokenInput.value = '';
-            }
-        }
-        
-        // Load token from storage on page load
-        function loadToken() {
-            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-            const tokenInput = document.getElementById('tokenInput');
-            if (storedToken && tokenInput) {
-                tokenInput.value = storedToken;
-            }
-            
-            // Also check URL parameter
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlToken = urlParams.get('token');
-            if (urlToken && tokenInput && !tokenInput.value) {
-                tokenInput.value = urlToken;
-                localStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
-            }
-        }
-        
         // Connect to WebSocket
-        function connect() {
+        async function connect() {
             if (isConnected) return;
+
+            const token = document.getElementById('tokenInput').value;
+            if (!token) {
+                updateStatus('Enter the authentication token', 'disconnected');
+                return;
+            }
 
             updateStatus('Connecting...', 'connecting');
             updateButtons(true, false);
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const basePath = getBasePath();
-            // Get token from multiple sources
-            const token = getToken();
-            let wsUrl = protocol + '//' + window.location.host + basePath + 'ws';
-            if (token) {
-                wsUrl += '?token=' + encodeURIComponent(token);
+            try {
+                const basePath = getBasePath();
+                const response = await fetch(basePath + 'terminal-ticket', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (!response.ok) throw new Error('Terminal authorization failed');
+                const { ticket } = await response.json();
+                const wsUrl = 'wss://' + window.location.host + basePath + 'ws';
+                socket = new WebSocket(wsUrl, ['webshell', ticket]);
+            } catch (error) {
+                updateStatus(error.message, 'disconnected');
+                updateButtons(false, false);
+                return;
             }
-            
-            socket = new WebSocket(wsUrl);
 
             socket.onopen = function(event) {
                 isConnected = true;
@@ -365,13 +308,6 @@ const TerminalTemplate = `<!DOCTYPE html>
                 updateButtons(false, false);
                 term.write('\r\nDisconnected from WebShell\r\n');
                 
-                // Auto-reconnect after 2 seconds
-                setTimeout(() => {
-                    if (!isConnected) {
-                        term.write('\r\nReconnecting...\r\n');
-                        connect();
-                    }
-                }, 2000);
             };
 
             socket.onerror = function(error) {
@@ -430,26 +366,14 @@ const TerminalTemplate = `<!DOCTYPE html>
         // Initialize when page loads
         window.addEventListener('load', function() {
             updateHomeLink();
-            loadToken();
             initTerminal();
         });
     </script>
 </body>
 </html>`
 
-var (
-	terminalTemplate *template.Template
-)
+var terminalTemplate, terminalTemplateError = template.New("terminal").Parse(TerminalTemplate)
 
-// GetTerminalTemplate returns the parsed terminal page template
 func GetTerminalTemplate() (*template.Template, error) {
-	if terminalTemplate == nil {
-		var err error
-		terminalTemplate, err = template.New("terminal").Parse(TerminalTemplate)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return terminalTemplate, nil
+	return terminalTemplate, terminalTemplateError
 }
-

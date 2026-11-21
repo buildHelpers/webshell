@@ -9,31 +9,35 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gorilla/websocket"
 	"github.com/creack/pty"
+	"github.com/gorilla/websocket"
 )
 
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for development
-	},
+	CheckOrigin:  func(r *http.Request) bool { return r.Header.Get("Origin") == "" || sameOrigin(r) },
+	Subprotocols: []string{"webshell"},
 }
 
 // TerminalSession represents a WebSocket terminal session
 type TerminalSession struct {
-	conn   *websocket.Conn
-	cmd    *exec.Cmd
-	pty    *os.File
+	conn *websocket.Conn
+	cmd  *exec.Cmd
+	pty  *os.File
 }
 
 // handleWebSocket handles WebSocket connections for the terminal
-func WebSocket(w http.ResponseWriter, r *http.Request) {
+func (tickets *Tickets) WebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
+	if !tickets.authorize(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -41,20 +45,18 @@ func WebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	
+
 	// Create a new terminal session
 	session := &TerminalSession{
 		conn: conn,
 	}
-	
+
 	// Start the shell process
 	if err := session.startShell(); err != nil {
 		log.Printf("Failed to start shell: %v", err)
 		conn.WriteMessage(websocket.TextMessage, []byte("Error: Failed to start shell\r\n"))
 		return
 	}
-	defer session.cleanup()
-	
 	// Handle terminal session
 	session.handle()
 }
@@ -63,30 +65,30 @@ func WebSocket(w http.ResponseWriter, r *http.Request) {
 func (ts *TerminalSession) startShell() error {
 	// Start bash shell with proper environment
 	ts.cmd = exec.Command("bash")
-	
+
 	// Set environment variables for proper terminal support
 	ts.cmd.Env = append(os.Environ(),
 		"TERM=xterm",
 		"TERMINFO=/usr/share/terminfo",
 	)
-	
+
 	// Create PTY
 	ptyFile, err := pty.Start(ts.cmd)
 	if err != nil {
 		return err
 	}
 	ts.pty = ptyFile
-	
+
 	log.Printf("PTY created, waiting for client to set size")
-	
+
 	return nil
 }
 
 // handle manages the WebSocket communication
 func (ts *TerminalSession) handle() {
 	// Channel to signal when the command is done
-	done := make(chan bool)
-	
+	done := make(chan struct{}, 2)
+
 	// Read from PTY and send to WebSocket
 	go func() {
 		buffer := make([]byte, 1024)
@@ -106,9 +108,9 @@ func (ts *TerminalSession) handle() {
 				}
 			}
 		}
-		done <- true
+		done <- struct{}{}
 	}()
-	
+
 	// Read from WebSocket and write to PTY
 	go func() {
 		for {
@@ -119,7 +121,7 @@ func (ts *TerminalSession) handle() {
 				}
 				break
 			}
-			
+
 			// Check if it's a resize message
 			if len(message) > 0 && message[0] == '{' {
 				var resizeMsg struct {
@@ -137,20 +139,20 @@ func (ts *TerminalSession) handle() {
 						log.Printf("Error resizing PTY: %v", err)
 					} else {
 						log.Printf("Successfully resized PTY to %dx%d", resizeMsg.Cols, resizeMsg.Rows)
-						
+
 						// Update environment variables in the shell
 						colsStr := fmt.Sprintf("%d", resizeMsg.Cols)
 						rowsStr := fmt.Sprintf("%d", resizeMsg.Rows)
-						
+
 						// Send commands to update COLUMNS and LINES
-						updateCmd := fmt.Sprintf("export COLUMNS=%s; export LINES=%s; stty cols %s rows %s\n", 
+						updateCmd := fmt.Sprintf("export COLUMNS=%s; export LINES=%s; stty cols %s rows %s\n",
 							colsStr, rowsStr, colsStr, rowsStr)
 						ts.pty.Write([]byte(updateCmd))
 					}
 					continue
 				}
 			}
-			
+
 			// Write to PTY
 			_, err = ts.pty.Write(message)
 			if err != nil {
@@ -158,21 +160,15 @@ func (ts *TerminalSession) handle() {
 				break
 			}
 		}
-		done <- true
+		done <- struct{}{}
 	}()
-	
-	// Wait for the command to finish
-	ts.cmd.Wait()
-	<-done
-	<-done
-}
 
-// cleanup cleans up the terminal session
-func (ts *TerminalSession) cleanup() {
-	if ts.pty != nil {
-		ts.pty.Close()
-	}
-	if ts.cmd != nil && ts.cmd.Process != nil {
-		ts.cmd.Process.Kill()
-	}
-} 
+	<-done
+	// Closing both endpoints releases the other goroutine when the client or
+	// shell disconnects first.
+	ts.conn.Close()
+	ts.pty.Close()
+	ts.cmd.Process.Kill()
+	<-done
+	ts.cmd.Wait()
+}

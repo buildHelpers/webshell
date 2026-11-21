@@ -37,13 +37,10 @@ func main() {
 		token = config.GetEnv("AUTH_TOKEN", "")
 	}
 
-	// Set auth token if provided
-	if token != "" {
-		config.SetAuthToken(token)
-		log.Printf("Authentication enabled")
-	} else {
-		log.Printf("Warning: No authentication token set. Server is open to all requests.")
+	if strings.TrimSpace(token) == "" {
+		log.Fatal("AUTH_TOKEN is required")
 	}
+	config.SetAuthToken(token)
 
 	// Get secure path from flag, env, or default (/)
 	pathPrefix := *securePath
@@ -54,7 +51,8 @@ func main() {
 	// Normalize path prefix: ensure it starts with / and ends with /
 	pathPrefix = normalizePath(pathPrefix)
 
-	setupRoutes(pathPrefix)
+	mux := http.NewServeMux()
+	setupRoutes(mux, pathPrefix)
 
 	// Get certificate and key file paths
 	certPath := *certFile
@@ -65,20 +63,8 @@ func main() {
 	if keyPath == "" {
 		keyPath = config.GetEnv("KEY_FILE", "")
 	}
-	if (certPath == "") != (keyPath == "") {
-		log.Fatal("both CERT_FILE and KEY_FILE are required for TLS")
-	}
-	// Chumen's service installer always supplies AUTH_TOKEN and a certificate. Refuse a
-	// misconfigured authenticated service rather than silently exposing its bearer token over HTTP.
-	if token != "" && certPath == "" {
-		log.Fatal("authenticated Chumen WebShell requires TLS certificate and key")
-	}
-
-	log.Printf("WebShell server starting on port %s", serverPort)
-	if certPath != "" && keyPath != "" {
-		log.Printf("HTTPS enabled (cert: %s, key: %s)", certPath, keyPath)
-	} else {
-		log.Printf("HTTP mode (no certificate provided)")
+	if certPath == "" || keyPath == "" {
+		log.Fatal("CERT_FILE and KEY_FILE are required")
 	}
 	log.Printf("Path prefix: %s", pathPrefix)
 	log.Printf("  - Home: %s", pathPrefix)
@@ -90,23 +76,15 @@ func main() {
 	log.Printf("  - Upload (PUT raw body): %supload", pathPrefix)
 	log.Printf("  - Download: %sdownload", pathPrefix)
 
-	// Start server with or without TLS
-	if certPath != "" && keyPath != "" {
-		// HTTPS mode
-		server := &http.Server{
-			Addr: ":" + serverPort,
-			TLSConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			},
-		}
-		if err := server.ListenAndServeTLS(certPath, keyPath); err != nil {
-			log.Fatal("HTTPS server failed:", err)
-		}
-	} else {
-		// HTTP mode
-		if err := http.ListenAndServe(":"+serverPort, nil); err != nil {
-			log.Fatal("HTTP server failed:", err)
-		}
+	server := &http.Server{
+		Addr:    ":" + serverPort,
+		Handler: mux,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+	if err := server.ListenAndServeTLS(certPath, keyPath); err != nil {
+		log.Fatal("HTTPS server failed:", err)
 	}
 }
 
@@ -125,23 +103,25 @@ func normalizePath(path string) string {
 	return path
 }
 
-func setupRoutes(pathPrefix string) {
+func setupRoutes(mux *http.ServeMux, pathPrefix string) {
 	// Public routes
-	http.HandleFunc(pathPrefix, handler.Home)
-	http.HandleFunc(pathPrefix+"health", handler.Health)
+	mux.HandleFunc(pathPrefix+"{$}", handler.Home)
+	mux.HandleFunc(pathPrefix+"health", handler.Health)
+	mux.HandleFunc(pathPrefix+"terminal", handler.TerminalPage)
 
 	// Protected routes
 	// Agent routes are fixed operations for application clients. Keep them separate from the
 	// interactive terminal so Chumen never has to expose an arbitrary command execution surface.
-	http.HandleFunc(pathPrefix+"api/v1/status", auth.AuthMiddleware(agent.Status))
-	http.HandleFunc(pathPrefix+"api/v1/control-plane", auth.AuthMiddleware(agent.ControlPlaneConfiguration))
-	http.HandleFunc(pathPrefix+"api/v1/domain/status", auth.AuthMiddleware(agent.DomainStatus))
-	http.HandleFunc(pathPrefix+"api/v1/domain/setup", auth.AuthMiddleware(agent.SetupDomain))
-	http.HandleFunc(pathPrefix+"api/v1/xray/install", auth.AuthMiddleware(agent.InstallXray))
-	http.HandleFunc(pathPrefix+"execute", auth.AuthMiddleware(handler.ExecuteCommand))
-	http.HandleFunc(pathPrefix+"terminal", auth.AuthMiddleware(handler.TerminalPage))
-	http.HandleFunc(pathPrefix+"ws", auth.AuthMiddleware(terminal.WebSocket))
-	http.HandleFunc(pathPrefix+"upload", auth.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(pathPrefix+"api/v1/status", auth.AuthMiddleware(agent.Status))
+	mux.HandleFunc(pathPrefix+"api/v1/control-plane", auth.AuthMiddleware(agent.ControlPlaneConfiguration))
+	mux.HandleFunc(pathPrefix+"api/v1/domain/status", auth.AuthMiddleware(agent.DomainStatus))
+	mux.HandleFunc(pathPrefix+"api/v1/domain/setup", auth.AuthMiddleware(agent.SetupDomain))
+	mux.HandleFunc(pathPrefix+"api/v1/xray/install", auth.AuthMiddleware(agent.InstallXray))
+	mux.HandleFunc(pathPrefix+"execute", auth.AuthMiddleware(handler.ExecuteCommand))
+	tickets := terminal.NewTickets()
+	mux.HandleFunc(pathPrefix+"terminal-ticket", auth.AuthMiddleware(tickets.Issue))
+	mux.HandleFunc(pathPrefix+"ws", tickets.WebSocket)
+	mux.HandleFunc(pathPrefix+"upload", auth.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			handler.UploadFile(w, r)
@@ -151,5 +131,5 @@ func setupRoutes(pathPrefix string) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	}))
-	http.HandleFunc(pathPrefix+"download", auth.AuthMiddleware(handler.DownloadFile))
+	mux.HandleFunc(pathPrefix+"download", auth.AuthMiddleware(handler.DownloadFile))
 }

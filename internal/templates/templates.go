@@ -56,9 +56,6 @@ const HomeTemplate = `<!DOCTYPE html>
             color: #000000;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -108,10 +105,7 @@ Response (JSON with Accept: application/json):
         
         <h2>Authentication</h2>
         <div class="test-form" style="margin-bottom: 20px;">
-            <input type="password" id="tokenInput" placeholder="Enter authentication token (optional)" style="width: 400px; padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px;">
-            <button onclick="saveToken()" style="padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px; background: #007bff; color: white; cursor: pointer;">Save Token</button>
-            <button onclick="clearToken()" style="padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px; background: #dc3545; color: white; cursor: pointer;">Clear</button>
-            <div id="tokenStatus" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
+            <input type="password" id="tokenInput" autocomplete="off" placeholder="Authentication token" style="width: 400px; padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 3px;">
         </div>
         
         <h2>Test Command Execution</h2>
@@ -154,133 +148,26 @@ Response (JSON with Accept: application/json):
         <h2>Example Usage</h2>
         <div class="example">
 # Simple command (returns raw output)
-curl -X POST http://localhost:8080/execute -d "ls -la"
+curl -X POST https://localhost:8080/execute -d "ls -la"
 
 # With authentication token (if enabled)
-curl -X POST http://localhost:8080/execute \
+curl -X POST https://localhost:8080/execute \
   -H "X-Auth-Token: your-token-here" \
   -d "ls -la"
 
 # Command with arguments (returns raw output)
-curl -X POST http://localhost:8080/execute -d "find . -name '*.go'"
+curl -X POST https://localhost:8080/execute -d "find . -name '*.go'"
 
 # Get JSON response with metadata
-curl -X POST http://localhost:8080/execute \
+curl -X POST https://localhost:8080/execute \
   -H "Accept: application/json" \
   -H "X-Auth-Token: your-token-here" \
   -d "uname -a"
 
-# Using query parameter for token
-curl -X POST "http://localhost:8080/execute?token=your-token-here" \
-  -d "uptime"
         </div>
     </div>
     
     <script>
-        // Get base path from current URL
-        function getBasePath() {
-            const path = window.location.pathname;
-            // Extract base path (everything before the last segment)
-            // e.g., /xx/terminal -> /xx/
-            // e.g., /xx/ -> /xx/
-            // e.g., / -> /
-            const segments = path.split('/').filter(s => s);
-            if (segments.length > 0) {
-                // Remove the last segment (like 'terminal' or empty)
-                segments.pop();
-            }
-            const basePath = '/' + segments.join('/');
-            return basePath.endsWith('/') ? basePath : basePath + '/';
-        }
-        
-        // Token storage key
-        const TOKEN_STORAGE_KEY = 'webshell_auth_token';
-        
-        // Get token from multiple sources (priority: input > localStorage > URL)
-        function getToken() {
-            // First check input field
-            const tokenInput = document.getElementById('tokenInput');
-            if (tokenInput && tokenInput.value) {
-                return tokenInput.value;
-            }
-            
-            // Then check localStorage
-            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-            if (storedToken) {
-                return storedToken;
-            }
-            
-            // Finally check URL parameter
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('token');
-        }
-        
-        // Save token to localStorage and update UI
-        function saveToken() {
-            const tokenInput = document.getElementById('tokenInput');
-            const token = tokenInput.value.trim();
-            const statusDiv = document.getElementById('tokenStatus');
-            
-            if (token) {
-                localStorage.setItem(TOKEN_STORAGE_KEY, token);
-                statusDiv.textContent = '✓ Token saved';
-                statusDiv.style.color = '#28a745';
-                updateTerminalLink();
-            } else {
-                clearToken();
-            }
-        }
-        
-        // Clear token from storage and input
-        function clearToken() {
-            localStorage.removeItem(TOKEN_STORAGE_KEY);
-            const tokenInput = document.getElementById('tokenInput');
-            if (tokenInput) {
-                tokenInput.value = '';
-            }
-            const statusDiv = document.getElementById('tokenStatus');
-            statusDiv.textContent = 'Token cleared';
-            statusDiv.style.color = '#dc3545';
-            updateTerminalLink();
-        }
-        
-        // Load token from storage on page load
-        function loadToken() {
-            const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-            const tokenInput = document.getElementById('tokenInput');
-            if (storedToken && tokenInput) {
-                tokenInput.value = storedToken;
-                const statusDiv = document.getElementById('tokenStatus');
-                statusDiv.textContent = '✓ Token loaded from storage';
-                statusDiv.style.color = '#28a745';
-            }
-            
-            // Also check URL parameter
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlToken = urlParams.get('token');
-            if (urlToken && tokenInput && !tokenInput.value) {
-                tokenInput.value = urlToken;
-                localStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
-                const statusDiv = document.getElementById('tokenStatus');
-                statusDiv.textContent = '✓ Token loaded from URL';
-                statusDiv.style.color = '#28a745';
-            }
-        }
-        
-        // Update terminal link with token if present
-        function updateTerminalLink() {
-            const basePath = getBasePath();
-            const token = getToken();
-            const link = document.getElementById('terminalLink');
-            if (link) {
-                let href = basePath + 'terminal';
-                if (token) {
-                    href += '?token=' + encodeURIComponent(token);
-                }
-                link.href = href;
-            }
-        }
-        
         async function executeCommand() {
             const command = document.getElementById('commandInput').value.trim();
             if (!command) {
@@ -293,9 +180,9 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
             resultDiv.textContent = 'Executing...';
             
             try {
-                const basePath = getBasePath();
+                const basePath = window.location.pathname;
                 const headers = {};
-                const token = getToken();
+                const token = document.getElementById('tokenInput').value;
                 if (token) {
                     headers['X-Auth-Token'] = token;
                 }
@@ -326,32 +213,13 @@ curl -X POST "http://localhost:8080/execute?token=your-token-here" \
             }
         });
         
-        // Allow Enter key to save token
-        document.getElementById('tokenInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                saveToken();
-            }
-        });
-        
-        // Initialize on page load
-        loadToken();
-        updateTerminalLink();
+        document.getElementById('terminalLink').href = './terminal';
     </script>
 </body>
 </html>`
 
-var (
-	homeTemplate *template.Template
-)
+var homeTemplate, homeTemplateError = template.New("home").Parse(HomeTemplate)
 
-// GetHomeTemplate returns the parsed home page template
 func GetHomeTemplate() (*template.Template, error) {
-	if homeTemplate == nil {
-		var err error
-		homeTemplate, err = template.New("home").Parse(HomeTemplate)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return homeTemplate, nil
+	return homeTemplate, homeTemplateError
 }

@@ -1,17 +1,22 @@
 #!/bin/bash
 
 # WebShell Install Script
-set -e
+set -euo pipefail
 
 # Configuration
 REPO="buildHelpers/webshell"
-VERSION="latest"
+VERSION="v1.2.5"
 BINARY_NAME="chumen-webshell"
 SERVICE_NAME="chumen-webshell"
 INSTALL_SERVICE=false
 
 for argument in "$@"; do
     case "$argument" in
+        -h|--help)
+            echo "Usage: $0 [version] [--service]"
+            echo "Default release: $VERSION. Service installation requires AUTH_TOKEN."
+            exit 0
+            ;;
         --service) INSTALL_SERVICE=true ;;
         *) VERSION="$argument" ;;
     esac
@@ -46,105 +51,100 @@ esac
 PLATFORM="${OS}_${ARCH}"
 echo "Detected: ${OS} ${ARCH}"
 
-# Get version
-if [ "$VERSION" = "latest" ]; then
-    VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+VERSION="v${VERSION#v}"
+if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Specify an exact WebShell release, for example v1.2.5." >&2
+    exit 1
 fi
-VERSION=${VERSION#v}
-
-# Set filename
-FILENAME="webshell_${PLATFORM}"
-if [ "$PLATFORM" = "windows_amd64" ]; then
-    FILENAME="webshell.exe"
+SERVICE_PORT="${PORT:-8080}"
+SERVICE_PATH="${SECURE_PATH:-/}"
+PUBLIC_PORT="${PUBLIC_PORT:-443}"
+if [ "$INSTALL_SERVICE" = true ]; then
+    if [[ ! "${AUTH_TOKEN:-}" =~ [^[:space:]] || "$AUTH_TOKEN" =~ [[:cntrl:]] ]]; then
+        echo "A nonempty AUTH_TOKEN without control characters is required." >&2
+        exit 1
+    fi
+    if [[ ! "$SERVICE_PORT" =~ ^[0-9]{1,5}$ || ! "$PUBLIC_PORT" =~ ^[0-9]{1,5}$ ||
+          ! "$SERVICE_PATH" =~ ^/[a-zA-Z0-9/_-]*$ ]]; then
+        echo "Invalid WebShell service port or path." >&2
+        exit 1
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "systemd is required for --service." >&2
+        exit 1
+    fi
 fi
 
-DOWNLOAD_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${FILENAME}"
+FILENAME="webshell_$PLATFORM"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -f "$TMP_DIR/$FILENAME"; rmdir "$TMP_DIR"' EXIT
 
-echo "Downloading WebShell v${VERSION} for ${PLATFORM}"
-echo "URL: ${DOWNLOAD_URL}"
-
-# Download
-if curl -L -o "${FILENAME}" "${DOWNLOAD_URL}"; then
-    echo "Download successful"
-else
-    echo "Download failed"
-    echo "Make sure the release exists at: https://github.com/${REPO}/releases/tag/v${VERSION}"
+# GitHub returns the digest for each asset in a published immutable release.
+DIGEST="$(curl -fsSL --proto '=https' \
+    "https://api.github.com/repos/$REPO/releases/tags/$VERSION" |
+    python3 -c '
+import json, re, sys
+release = json.load(sys.stdin)
+tag, name = sys.argv[1:]
+if release["tag_name"] != tag or release["immutable"] is not True:
+    raise SystemExit("WebShell requires an immutable release")
+for asset in release["assets"]:
+    if asset["name"] == name and re.fullmatch(r"sha256:[a-f0-9]{64}", asset.get("digest") or ""):
+        print(asset["digest"][7:])
+        break
+else:
+    raise SystemExit("Release asset has no GitHub SHA-256 digest")
+' "$VERSION" "$FILENAME")"
+curl -fsSL --proto '=https' \
+    "https://github.com/$REPO/releases/download/$VERSION/$FILENAME" -o "$TMP_DIR/$FILENAME"
+ACTUAL="$(openssl dgst -sha256 -r "$TMP_DIR/$FILENAME" | cut -d ' ' -f 1)"
+if [ "$ACTUAL" != "$DIGEST" ]; then
+    echo "WebShell release asset checksum mismatch." >&2
     exit 1
 fi
 
-# Install
-echo "Installing WebShell"
-chmod +x "${FILENAME}"
+as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo -n "$@"
+    fi
+}
 
-if [ -w "/usr/local/bin" ] || sudo -n true 2>/dev/null; then
-    sudo mv "${FILENAME}" "/usr/local/bin/${BINARY_NAME}"
-    echo "Installed to /usr/local/bin/${BINARY_NAME}"
+SERVICE_BINARY="/usr/local/bin/$BINARY_NAME"
+if [ "$INSTALL_SERVICE" = true ] || [ "$(id -u)" -eq 0 ] || sudo -n true 2>/dev/null; then
+    as_root install -m 755 "$TMP_DIR/$FILENAME" "$SERVICE_BINARY"
 else
     mkdir -p "$HOME/.local/bin"
-    mv "${FILENAME}" "$HOME/.local/bin/${BINARY_NAME}"
-    echo "Installed to $HOME/.local/bin/${BINARY_NAME}"
-    echo "Add $HOME/.local/bin to your PATH if not already added"
-    echo "Add this line to your shell profile:"
-    echo "export PATH=\"\$HOME/.local/bin:\$PATH\""
-    echo "Alternative: you can run ~/.local/bin/chumen-webshell"
+    SERVICE_BINARY="$HOME/.local/bin/$BINARY_NAME"
+    install -m 755 "$TMP_DIR/$FILENAME" "$SERVICE_BINARY"
 fi
-
-# Verify
-echo "Verifying installation"
-if command -v "$BINARY_NAME" >/dev/null 2>&1; then
-    VERSION_INFO=$("$BINARY_NAME" --version 2>/dev/null || echo "unknown version")
-    echo "WebShell installed successfully"
-    echo "Version: ${VERSION_INFO}"
-    echo "Location: $(which $BINARY_NAME)"
-else
-    echo "Installation verification failed"
-    echo "Try adding the installation directory to your PATH"
-    exit 1
-fi
-
-echo ""
-echo "WebShell installation completed successfully"
-echo ""
+echo "Installed verified WebShell $VERSION to $SERVICE_BINARY"
 
 # A service install is the bootstrap contract used by application clients. Keeping token, port,
 # and path in a root-only EnvironmentFile avoids leaking them through the systemd unit itself.
 if [ "$INSTALL_SERVICE" = true ]; then
-    if [ -z "${AUTH_TOKEN:-}" ]; then
-        echo "AUTH_TOKEN is required when installing the WebShell service"
-        exit 1
-    fi
-    if ! command -v systemctl >/dev/null 2>&1; then
-        echo "systemd is required for --service"
-        exit 1
-    fi
-    SERVICE_PORT="${PORT:-8080}"
-    SERVICE_PATH="${SECURE_PATH:-/}"
-    SERVICE_BINARY="$(command -v "$BINARY_NAME")"
-    if [ "$(id -u)" -eq 0 ]; then
-        AS_ROOT=""
-    else
-        AS_ROOT="sudo -n"
-    fi
-    $AS_ROOT install -d -m 700 /etc/chumen-webshell/tls
+    as_root install -d -m 700 /etc/chumen-webshell/tls
     CERT_FILE="/etc/chumen-webshell/tls/server.crt"
     KEY_FILE="/etc/chumen-webshell/tls/server.key"
-    if [ ! -s "$CERT_FILE" ] || [ ! -s "$KEY_FILE" ]; then
-        command -v openssl >/dev/null 2>&1 || { $AS_ROOT apt-get update -qq && $AS_ROOT apt-get install -y -qq openssl; }
-        $AS_ROOT openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 \
+    if ! as_root test -s "$CERT_FILE" || ! as_root test -s "$KEY_FILE"; then
+        as_root openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 \
             -subj "/CN=chumen-webshell" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1
-        $AS_ROOT chmod 600 "$KEY_FILE"
+        as_root chmod 600 "$KEY_FILE"
     fi
-    TLS_FINGERPRINT=$($AS_ROOT openssl x509 -in "$CERT_FILE" -noout -fingerprint -sha256 | sed 's/.*=//' | tr -d ':')
-    $AS_ROOT install -d -m 700 /etc/chumen-webshell
-    $AS_ROOT sh -c "umask 077 && cat > /etc/chumen-webshell/chumen-webshell.env" <<EOF
-AUTH_TOKEN=${AUTH_TOKEN}
+    TLS_FINGERPRINT=$(as_root openssl x509 -in "$CERT_FILE" -noout -fingerprint -sha256 | sed 's/.*=//' | tr -d ':')
+    as_root install -d -m 700 /etc/chumen-webshell
+    as_root install -m 600 /dev/null /etc/chumen-webshell/chumen-webshell.env
+    ESCAPED_TOKEN="$(printf '%s' "$AUTH_TOKEN" | sed 's/[\\"]/\\&/g')"
+    as_root tee /etc/chumen-webshell/chumen-webshell.env >/dev/null <<EOF
+AUTH_TOKEN="${ESCAPED_TOKEN}"
 PORT=${SERVICE_PORT}
 SECURE_PATH=${SERVICE_PATH}
-PUBLIC_PORT=${PUBLIC_PORT:-443}
+PUBLIC_PORT=${PUBLIC_PORT}
 CERT_FILE=${CERT_FILE}
 KEY_FILE=${KEY_FILE}
 EOF
-    $AS_ROOT tee /etc/systemd/system/${SERVICE_NAME}.service >/dev/null <<EOF
+    as_root tee /etc/systemd/system/${SERVICE_NAME}.service >/dev/null <<EOF
 [Unit]
 Description=Chumen WebShell management API
 After=network-online.target
@@ -163,36 +163,15 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-    $AS_ROOT systemctl daemon-reload
-    $AS_ROOT systemctl enable --now "$SERVICE_NAME"
-    $AS_ROOT systemctl is-active --quiet "$SERVICE_NAME"
+    as_root systemctl daemon-reload
+    as_root systemctl enable "$SERVICE_NAME"
+    as_root systemctl restart "$SERVICE_NAME"
+    as_root systemctl is-active --quiet "$SERVICE_NAME"
     echo "WebShell systemd service is active on port ${SERVICE_PORT}"
     echo "CHUMEN_WEBSHELL_TLS_SHA256=${TLS_FINGERPRINT}"
 fi
 
 echo "Usage Information:"
-echo "Start WebShell: $BINARY_NAME"
-echo "Access Web Interface: http://localhost:8080"
-echo "Access Web Terminal: http://localhost:8080/terminal"
+echo "Start WebShell with AUTH_TOKEN, CERT_FILE and KEY_FILE configured."
+echo "Fixed terminal entry: https://<host>:${SERVICE_PORT}${SERVICE_PATH%/}/terminal"
 echo "Documentation: https://github.com/${REPO}"
-echo "Custom Port: PORT=3000 $BINARY_NAME"
-
-# Handle command line arguments
-case "${1:-}" in
-    -h|--help)
-        echo "WebShell Install Script"
-        echo ""
-        echo "Usage: $0 [version]"
-        echo ""
-        echo "Arguments:"
-        echo "  version    Specific version to install (default: latest)"
-        echo ""
-        echo "Examples:"
-        echo "  $0              # Install latest version"
-        echo "  $0 v0.1.6       # Install specific version"
-        echo "  $0 0.1.6        # Install specific version (without v prefix)"
-        exit 0
-        ;;
-    *)
-        ;;
-esac

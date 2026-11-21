@@ -6,43 +6,11 @@ A secure HTTP server that can execute CLI commands via REST API endpoints using 
 
 ## Quick Install
 
-### Automatic Installation (Recommended)
+### 安装
 
-```bash
-# Install latest version
-curl -fsSL https://raw.githubusercontent.com/adaptive-scale/webshell/master/install.sh | bash
+从可信源码取得本仓库的 `install.sh`，或从已启用不可变制品的 [WebShell Release](https://github.com/buildHelpers/webshell/releases) 获取并核对脚本摘要。运行 `bash install.sh v1.2.5` 会核对所选平台的制品摘要后安装，需要 `curl`、`python3` 和 `openssl`。
 
-# Install specific version
-curl -fsSL https://raw.githubusercontent.com/adaptive-scale/webshell/master/install.sh | bash -s v0.1.6
-```
-
-### Manual Installation
-
-1. **Download** the appropriate binary for your platform from [GitHub Releases](https://github.com/adaptive-scale/webshell/releases)
-2. **Make executable**: `chmod +x webshell_*`
-3. **Run**: `./webshell_*` (or `webshell.exe` on Windows)
-
-### Installation Steps
-
-The automatic installer will:
-
-1. **Detect your platform** (Linux, macOS, Windows)
-2. **Download the correct binary** for your architecture (AMD64/ARM64)
-3. **Install to system directory** (`/usr/local/bin`) or user directory (`~/.local/bin`)
-4. **Verify installation** and show usage information
-
-### After Installation
-
-```bash
-# Start WebShell (if installed to system PATH)
-webshell
-
-# Or run directly from user directory
-~/.local/bin/webshell
-
-# Custom port
-PORT=3000 webshell
-```
+Linux 上可使用 `bash install.sh v1.2.5 --service` 安装 systemd 服务。执行前设置 `AUTH_TOKEN`，安装器会报告证书的 SHA-256 指纹。
 
 ### Supported Platforms
 
@@ -68,50 +36,17 @@ PORT=3000 webshell
 - 🔐 **Secure Path Prefix** - Customize all endpoint paths for enhanced security
 - 🔒 **HTTPS Support** - TLS/SSL certificate support for secure connections
 
-## Quick Start
+## 固定访问入口
 
-### 1. Run the Server
+启动本地二进制前，请通过环境变量 `AUTH_TOKEN`、`CERT_FILE` 和 `KEY_FILE` 配置长期 Token、可信证书和私钥。可用 `PORT`、`SECURE_PATH` 指定端口与路径前缀。
 
-```bash
-# Using installed binary
-webshell
+收藏 `https://服务器:端口/路径前缀/terminal`。路径前缀为 `/` 时，入口是 `https://服务器:端口/terminal`。在页面输入长期 Token 后，浏览器会获取一张 30 秒内可用一次的终端票据。浏览器需要信任该服务器的证书。
 
-# Using downloaded binary
-./webshell_linux_amd64
-
-# Custom port
-PORT=3000 webshell
-```
-
-The server will start on port 8080 by default. You can change the port by setting the `PORT` environment variable.
-
-### 2. Access the Web Interface
-
-Open your browser and navigate to `http://localhost:8080` to see the interactive web interface with usage examples and a test form.
-
-### 3. Use the Web Terminal
-
-Click the "🖥️ Open Web Terminal" button or navigate to `http://localhost:8080/terminal` for a full interactive shell experience.
-
-### 4. Execute Commands via API
+API 调用在 HTTPS 请求头中传入 `X-Auth-Token` 或 `Authorization: Bearer …`。以下示例使用可信渠道取得的服务器证书。
 
 ```bash
-# List files in current directory (returns raw output)
-curl -X POST http://localhost:8080/execute -d "ls -la"
-
-# Check system uptime (returns raw output)
-curl -X POST http://localhost:8080/execute -d "uptime"
-
-# Get current working directory (returns raw output)
-curl -X POST http://localhost:8080/execute -d "pwd"
-
-# Find files with specific pattern (returns raw output)
-curl -X POST http://localhost:8080/execute -d "find . -name '*.go'"
-
-# Get JSON response with metadata
-curl -X POST http://localhost:8080/execute \
-  -H "Accept: application/json" \
-  -d "uname -a"
+curl --cacert "$CERT_FILE" -H "X-Auth-Token: $AUTH_TOKEN" \
+  https://localhost:8080/api/v1/status
 ```
 
 ## Using Makefile
@@ -242,61 +177,9 @@ PORT=3000 make run-build
 PORT=3000 make docker-run
 ```
 
-### Authentication (Optional)
+### 认证
 
-WebShell supports optional authentication via token. If a token is set, all API endpoints (except `/` and `/health`) will require authentication.
-
-**Using Command Line:**
-```bash
-# Start with token from command line
-./webshell -token "your-secret-token"
-
-# Start with token and custom port
-./webshell -port 3000 -token "your-secret-token"
-```
-
-**Using Environment Variable:**
-```bash
-# Set token via environment variable
-export AUTH_TOKEN="your-secret-token"
-./webshell
-
-# Or combine with port
-export PORT=3000
-export AUTH_TOKEN="your-secret-token"
-./webshell
-```
-
-**Using Token in Requests:**
-
-1. **Via Header (Recommended):**
-```bash
-curl -X POST http://localhost:8080/execute \
-  -H "X-Auth-Token: your-secret-token" \
-  -d "ls -la"
-```
-
-2. **Via Authorization Header:**
-```bash
-curl -X POST http://localhost:8080/execute \
-  -H "Authorization: Bearer your-secret-token" \
-  -d "ls -la"
-```
-
-3. **Via Query Parameter:**
-```bash
-curl -X POST "http://localhost:8080/execute?token=your-secret-token" \
-  -d "ls -la"
-```
-
-**Web Interface:**
-- If token is set, access the web interface with: `http://localhost:8080?token=your-secret-token`
-- The token will be automatically passed to all API calls and WebSocket connections
-
-**Security Note:**
-- If no token is set, the server is open to all requests (development mode)
-- Always use a strong, random token in production environments
-- The token is checked for all endpoints except `/` (home page) and `/health`
+启动必须配置长期 Token。命令执行、文件传输和应用集成 API 使用请求头认证。服务首页、健康检查与终端登录页可直接访问。浏览器仅将长期 Token 提交给同源 HTTPS 的票据签发端点。
 
 ### Secure Path Prefix
 
@@ -335,7 +218,7 @@ export SECURE_PATH="/abc123/"
 ./webshell -token mytoken -path /xyz789/
 
 # Access endpoints
-curl -X POST http://localhost:8080/xyz789/execute \
+curl -X POST https://localhost:8080/xyz789/execute \
   -H "Authorization: Bearer mytoken" \
   -d "ls -la"
 ```
@@ -452,7 +335,7 @@ Upload files to the server. Supports overwrite and skip options.
 
 **Request (multipart/form-data):**
 ```bash
-curl -X POST http://localhost:8080/upload \
+curl -X POST https://localhost:8080/upload \
   -H "Authorization: Bearer your-token" \
   -F "file=@/path/to/local/file.txt" \
   -F "path=/server/path/file.txt" \
@@ -493,7 +376,7 @@ curl -X POST http://localhost:8080/upload \
 **Example with path prefix:**
 ```bash
 # Upload with custom path prefix
-curl -X POST http://localhost:8080/abc123/upload \
+curl -X POST https://localhost:8080/abc123/upload \
   -H "Authorization: Bearer your-token" \
   -F "file=@/path/to/local/file.txt" \
   -F "path=/server/path/file.txt" \
@@ -506,7 +389,7 @@ Download files from the server by path.
 
 **Request:**
 ```bash
-curl -X GET "http://localhost:8080/download?path=/server/path/file.txt" \
+curl -X GET "https://localhost:8080/download?path=/server/path/file.txt" \
   -H "Authorization: Bearer your-token" \
   -o downloaded_file.txt
 ```
@@ -523,12 +406,12 @@ curl -X GET "http://localhost:8080/download?path=/server/path/file.txt" \
 **Example:**
 ```bash
 # Download a file
-curl -X GET "http://localhost:8080/download?path=/var/log/app.log" \
+curl -X GET "https://localhost:8080/download?path=/var/log/app.log" \
   -H "Authorization: Bearer your-token" \
   -o app.log
 
 # Download with path prefix
-curl -X GET "http://localhost:8080/abc123/download?path=/var/log/app.log" \
+curl -X GET "https://localhost:8080/abc123/download?path=/var/log/app.log" \
   -H "Authorization: Bearer your-token" \
   -o app.log
 ```
@@ -546,7 +429,7 @@ The web terminal provides a full interactive shell experience:
 
 ### Using the Web Terminal
 
-1. Navigate to `http://localhost:8080/terminal`
+1. Navigate to `https://localhost:8080/terminal`
 2. Click "Connect" to start a shell session
 3. Type commands as you would in a regular terminal
 4. Use "Disconnect" to end the session

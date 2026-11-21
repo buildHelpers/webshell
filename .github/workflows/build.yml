@@ -38,14 +38,15 @@ jobs:
             binary_name: webshell_darwin_arm64
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0  # 需要完整历史记录以获取 git describe 版本信息
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.19'
+          go-version: '1.27.4'
 
       - name: Get dependencies
         run: go mod download
@@ -54,7 +55,7 @@ jobs:
         run: make ${{ matrix.make_target }}
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.binary_name }}
           path: build/${{ matrix.binary_name }}
@@ -68,16 +69,16 @@ jobs:
       packages: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -85,7 +86,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -97,7 +98,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -116,65 +117,29 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: ./artifacts
 
-      - name: Prepare release assets
+      - name: Publish verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          mkdir -p release-assets
-          # 查找并复制所有二进制文件（可能在子目录中）
-          find ./artifacts -type f -name "webshell_*" -exec cp {} release-assets/ \;
-          # 如果没找到，尝试查找所有文件
-          if [ -z "$(ls -A release-assets)" ]; then
-            find ./artifacts -type f -executable -exec cp {} release-assets/ \;
-          fi
-          # 确保文件有执行权限
-          chmod +x release-assets/* 2>/dev/null || true
-          # 列出所有文件
-          echo "Release assets:"
-          ls -lh release-assets/ || echo "No files found in release-assets"
-          echo ""
-          echo "Artifacts structure:"
-          find ./artifacts -type f
-
-      - name: Get version from tag
-        id: get_version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release v${{ steps.get_version.outputs.version }}
-          body: |
-            ## v${{ steps.get_version.outputs.version }}
-
-            ### 📦 下载二进制文件
-            下载对应平台的二进制文件：
-            - `webshell_linux_amd64` - Linux AMD64
-            - `webshell_linux_arm64` - Linux ARM64
-            - `webshell_darwin_amd64` - macOS Intel
-            - `webshell_darwin_arm64` - macOS Apple Silicon
-
-            ### 🐳 Docker
-            ```bash
-            docker pull ghcr.io/buildhelpers/webshell:${{ steps.get_version.outputs.version }}
-            docker pull ghcr.io/buildhelpers/webshell:latest
-            ```
-
-            ### 📝 变更日志
-            查看 [完整变更日志](https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.ref_name }})
-          files: |
-            release-assets/*
-          draft: false
-          prerelease: false
-
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          assets=(install.sh)
+          for binary in webshell_linux_amd64 webshell_linux_arm64 webshell_darwin_amd64 webshell_darwin_arm64; do
+            asset="artifacts/$binary/$binary"
+            test -s "$asset"
+            assets+=("$asset")
+          done
+          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --draft --title "$RELEASE_TAG" --generate-notes
+          gh release edit "$RELEASE_TAG" --draft=false
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.immutable' | grep -qx true
